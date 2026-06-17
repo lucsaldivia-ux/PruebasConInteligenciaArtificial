@@ -1,0 +1,243 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Description: 'Manantial Chatbot - Deployment en AWS Lambda + DynamoDB'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: prod
+    AllowedValues:
+      - dev
+      - prod
+    Description: Environment name
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 512
+    Runtime: python3.11
+    Environment:
+      Variables:
+        DYNAMODB_TABLE: !Ref SessionsTable
+        DYNAMODB_ORDERS_TABLE: !Ref OrdersTable
+        AWS_REGION: !Ref 'AWS::Region'
+        LANGSMITH_TRACING: 'false'  # Cambiar a true con tu API key
+        LOG_LEVEL: INFO
+
+Resources:
+  # ============== Lambda Function ==============
+
+  ChatbotFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: manantial-chatbot
+      CodeUri: .
+      Handler: src.api.lambda_handler.handler
+      Description: Manantial Chatbot API endpoint
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SessionsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref OrdersTable
+        - CloudWatchLogsFullAccess
+        - SecretsManagerReadPolicy:
+            SecretArn: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:manantial/*'
+      Events:
+        ChatMessage:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ChatbotApi
+            Path: /chat/message
+            Method: POST
+            Auth:
+              ApiKeyRequired: false
+
+        GetMetrics:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ChatbotApi
+            Path: /metrics
+            Method: GET
+
+        GetSession:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ChatbotApi
+            Path: /session/{conversation_id}
+            Method: GET
+
+        GetHistory:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ChatbotApi
+            Path: /history/{customer_name}
+            Method: GET
+
+        HealthCheck:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ChatbotApi
+            Path: /health
+            Method: GET
+
+  # ============== API Gateway ==============
+
+  ChatbotApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: manantial-chatbot-api
+      StageName: !Ref Environment
+      TracingEnabled: true
+      MethodSettings:
+        - ResourcePath: '/*'
+          HttpMethod: '*'
+          LoggingLevel: INFO
+          DataTraceEnabled: false
+          MetricsEnabled: true
+      Cors:
+        AllowMethods: "'POST,GET,OPTIONS'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization'"
+        AllowOrigin: "'*'"
+
+  # ============== DynamoDB Tables ==============
+
+  SessionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: manantial-sessions
+      BillingMode: PAY_PER_REQUEST  # Gratuito en Academy
+      AttributeDefinitions:
+        - AttributeName: conversation_id
+          AttributeType: S
+        - AttributeName: customer_name
+          AttributeType: S
+        - AttributeName: updated_at
+          AttributeType: N
+      KeySchema:
+        - AttributeName: conversation_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: customer_name-updated_at-index
+          KeySchema:
+            - AttributeName: customer_name
+              KeyType: HASH
+            - AttributeName: updated_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      Tags:
+        - Key: Project
+          Value: ManantialChatbot
+
+  OrdersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: manantial-orders
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: order_id
+          AttributeType: S
+        - AttributeName: customer_name
+          AttributeType: S
+        - AttributeName: created_at
+          AttributeType: N
+      KeySchema:
+        - AttributeName: order_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: customer_name-created_at-index
+          KeySchema:
+            - AttributeName: customer_name
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      Tags:
+        - Key: Project
+          Value: ManantialChatbot
+
+  # ============== CloudWatch Log Group ==============
+
+  ChatbotLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${ChatbotFunction}'
+      RetentionInDays: 7
+
+  # ============== IAM Role for Lambda ==============
+
+  ChatbotExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:Query
+                Resource:
+                  - !GetAtt SessionsTable.Arn
+                  - !GetAtt OrdersTable.Arn
+                  - !Sub '${SessionsTable.Arn}/index/*'
+                  - !Sub '${OrdersTable.Arn}/index/*'
+
+# ============== Outputs ==============
+
+Outputs:
+  ChatbotApiEndpoint:
+    Description: API Gateway endpoint URL
+    Value: !Sub 'https://${ChatbotApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}'
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiEndpoint'
+
+  ChatbotFunctionArn:
+    Description: Lambda Function ARN
+    Value: !GetAtt ChatbotFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-FunctionArn'
+
+  SessionsTableName:
+    Description: DynamoDB Sessions Table
+    Value: !Ref SessionsTable
+    Export:
+      Name: !Sub '${AWS::StackName}-SessionsTable'
+
+  OrdersTableName:
+    Description: DynamoDB Orders Table
+    Value: !Ref OrdersTable
+    Export:
+      Name: !Sub '${AWS::StackName}-OrdersTable'
+
+  FunctionLogGroup:
+    Description: CloudWatch Log Group
+    Value: !Ref ChatbotLogGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-LogGroup'
+
+  DeploymentInstructions:
+    Description: Instructions for deployment
+    Value: |
+      1. sam build
+      2. sam deploy --guided
+      3. Copy API endpoint URL and add to .env API_BASE_URL
+      4. streamlit run streamlit_app.py
