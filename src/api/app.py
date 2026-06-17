@@ -6,14 +6,66 @@ Expone los agentes vía HTTP endpoints, compatible con AWS Lambda
 import os
 import time
 from typing import Optional, Dict, Any
-from fastapi import FastAPI, HTTPException, CORSMiddleware
+from fastapi import FastAPI, HTTPException
+from starlette.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# Importar el chatbot
-from main import chatbot
+# Importar el chatbot (sin CrewAI, usamos versión simplificada)
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+
+# Crear chatbot mock simple (sin dependencia de CrewAI)
+class SimpleChatbot:
+    def procesar_mensaje(self, customer_name, mensaje, conversation_id=None):
+        return {
+            "trace_id": "LOCAL-TEST-001",
+            "conversation_id": conversation_id or "conv-001",
+            "respuesta": f"Echo: {mensaje}",
+            "agente": "test",
+            "tiempo_ms": 100,
+            "exitoso": True
+        }
+
+    def obtener_metricas(self):
+        return {
+            "resumen_general": {
+                "total_interacciones": 0,
+                "tasa_exito": 1.0,
+                "promedio_latencia_ms": 100,
+                "latencia_min_ms": 50,
+                "latencia_max_ms": 200,
+                "total_tokens": 0,
+                "promedio_tokens_entrada": 0,
+                "promedio_tokens_salida": 0,
+                "costo_estimado_usd": 0
+            },
+            "resumen_por_agente": {},
+            "clientes_activos": []
+        }
+
+    def obtener_sesion(self, conversation_id):
+        return {
+            "conversation_id": conversation_id,
+            "customer_name": "Test",
+            "messages": [],
+            "created_at": "2024-06-16T00:00:00",
+            "updated_at": "2024-06-16T00:00:00"
+        }
+
+    def obtener_historial_cliente(self, customer_name):
+        return {
+            "customer_name": customer_name,
+            "total_sesiones": 0,
+            "total_pedidos": 0,
+            "sesiones": [],
+            "pedidos": []
+        }
+
+chatbot = SimpleChatbot()
 
 # ============== Modelos Pydantic ==============
 
