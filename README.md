@@ -27,11 +27,7 @@ Su objetivo es experimentar con las capacidades, límites y metodologías de eva
    - Validación del formato de salida en JSON / Pydantic para consumo en software.
    - Comparación preliminar entre distintos modelos de lenguaje (LLMs).
 
----
 
-<Image src="image_agent_tag_16042685068038860033" alt="Gráfico de radar comparando diferentes modelos de IA en varias métricas" caption="Métricas de evaluación de modelos de IA" />
-
----
 
 ## 🛠️ Stack & Herramientas Utilizadas
 
